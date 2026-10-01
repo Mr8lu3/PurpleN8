@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-10-01T14:02:11.482+0000",
+  "rule": {
+    "level": 10, "id": "5763", "firedtimes": 1,
+    "description": "sshd: brute force trying to get access to the system. Authentication failed.",
+    "groups": ["syslog", "sshd", "authentication_failures"],
+    "mitre": { "id": ["T1110"], "tactic": ["Credential Access"], "technique": ["Brute Force"] }
+  },
+  "agent": { "id": "001", "name": "web-server-01", "ip": "10.0.1.15" },
+  "manager": { "name": "wazuh.manager" },
+  "id": "1759327331.1001",
+  "full_log": "Oct  1 14:02:11 web-server-01 sshd[2211]: Failed password for invalid user admin from 185.220.101.45 port 51122 ssh2",
+  "decoder": { "parent": "sshd", "name": "sshd" },
+  "data": { "srcip": "185.220.101.45", "srcport": "51122", "srcuser": "admin" },
+  "location": "/var/log/auth.log"
+}

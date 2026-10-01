@@ -1,0 +1,53 @@
+# PurpleN8 - n8n security automation lab
+#   n8n            workflow engine     http://localhost:5678
+#   wazuh.manager  SIEM manager        forwards alerts to n8n (see soar/wazuh-integration)
+#
+# The Wazuh manager runs on its own (no indexer/dashboard) to keep RAM low (~300 MB).
+# Alerts are still written to /var/ossec/logs/alerts/alerts.json inside the container.
+name: purplen8
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: purplen8-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    env_file: .env
+    environment:
+      - GENERIC_TIMEZONE=Europe/London
+      - N8N_SECURE_COOKIE=false
+      # lets workflows read TELEGRAM_CHAT_ID etc. via $env
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./:/files
+
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.9.2
+    container_name: purplen8-wazuh-manager
+    hostname: wazuh-manager
+    restart: unless-stopped
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 655360, hard: 655360 }
+    ports:
+      - "1514:1514"     # agent events
+      - "1515:1515"     # agent enrollment
+    volumes:
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - wazuh_integrations:/var/ossec/integrations
+      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_api_configuration:/var/ossec/api/configuration
+
+volumes:
+  n8n_data:
+    external: true      # create once with: docker volume create n8n_data
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  wazuh_integrations:
+  wazuh_active_response:
+  wazuh_api_configuration:
