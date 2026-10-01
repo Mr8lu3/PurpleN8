@@ -1,56 +1,45 @@
 {
   "id": "wazuhTriage00001",
   "name": "SOAR: Wazuh Alert Triage",
-  "active": false,
-  "settings": {
-    "executionOrder": "v1"
-  },
   "nodes": [
     {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wazuh-alert",
+        "options": {}
+      },
       "id": "a0000000-0000-4000-8000-000000000001",
       "name": "Wazuh Alert",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
         0,
-        300
+        304
       ],
-      "webhookId": "a0000000-0000-4000-8000-000000000065",
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "wazuh-alert",
-        "options": {}
-      }
+      "webhookId": "a0000000-0000-4000-8000-000000000065"
     },
     {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Pull the fields we care about out of a raw Wazuh alert.\n// Wazuh stores the source IP in different places depending on the log type.\nconst a = $json.body;\nconst d = a.data || {};\nconst srcip = d.srcip || d.src_ip || d.win?.eventdata?.ipAddress || null;\n\n// RFC1918 / loopback / link-local addresses can't be looked up publicly\nconst isPrivate = (ip) =>\n  /^(10\\.|127\\.|192\\.168\\.|172\\.(1[6-9]|2\\d|3[01])\\.|169\\.254\\.)/.test(ip) || ip === '::1' || ip === '-';\n\nreturn { json: {\n  alertId: a.id,\n  time: a.timestamp,\n  ruleId: a.rule?.id,\n  level: Number(a.rule?.level ?? 0),\n  description: a.rule?.description ?? 'Unknown rule',\n  groups: a.rule?.groups ?? [],\n  mitre: a.rule?.mitre?.id ?? [],\n  agent: a.agent?.name ?? 'unknown',\n  srcip,\n  srcuser: d.srcuser || d.dstuser || d.win?.eventdata?.targetUserName || null,\n  log: a.full_log ?? '',\n  publicIp: !!srcip && !isPrivate(srcip),\n} };"
+      },
       "id": "a0000000-0000-4000-8000-000000000002",
       "name": "Normalise Alert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        220,
-        300
-      ],
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// Pull the fields we care about out of a raw Wazuh alert.\n// Wazuh stores the source IP in different places depending on the log type.\nconst a = $json.body;\nconst d = a.data || {};\nconst srcip = d.srcip || d.src_ip || d.win?.eventdata?.ipAddress || null;\n\n// RFC1918 / loopback / link-local addresses can't be looked up publicly\nconst isPrivate = (ip) =>\n  /^(10\\.|127\\.|192\\.168\\.|172\\.(1[6-9]|2\\d|3[01])\\.|169\\.254\\.)/.test(ip) || ip === '::1' || ip === '-';\n\nreturn { json: {\n  alertId: a.id,\n  time: a.timestamp,\n  ruleId: a.rule?.id,\n  level: Number(a.rule?.level ?? 0),\n  description: a.rule?.description ?? 'Unknown rule',\n  groups: a.rule?.groups ?? [],\n  mitre: a.rule?.mitre?.id ?? [],\n  agent: a.agent?.name ?? 'unknown',\n  srcip,\n  srcuser: d.srcuser || d.dstuser || d.win?.eventdata?.targetUserName || null,\n  log: a.full_log ?? '',\n  publicIp: !!srcip && !isPrivate(srcip),\n} };"
-      }
+        224,
+        304
+      ]
     },
     {
-      "id": "a0000000-0000-4000-8000-000000000003",
-      "name": "Public IP?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        440,
-        300
-      ],
       "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "strict"
+            "typeValidation": "strict",
+            "version": 1
           },
           "conditions": [
             {
@@ -67,59 +56,46 @@
           "combinator": "and"
         },
         "options": {}
-      }
+      },
+      "id": "a0000000-0000-4000-8000-000000000003",
+      "name": "Public IP?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        448,
+        304
+      ]
     },
     {
+      "parameters": {
+        "url": "=http://ip-api.com/json/{{ $json.srcip }}?fields=status,message,country,city,isp,proxy,hosting,query",
+        "options": {}
+      },
       "id": "a0000000-0000-4000-8000-000000000004",
       "name": "Lookup IP",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        660,
-        200
+        672,
+        208
       ],
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "url": "=http://ip-api.com/json/{{ $json.srcip }}?fields=status,message,country,city,isp,proxy,hosting,query",
-        "options": {}
-      }
+      "onError": "continueRegularOutput"
     },
     {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// The normalised alert (reached back past the IP lookup)\nconst alert = $('Normalise Alert').item.json;\n// Geo data only exists if the alert went through \"Lookup IP\" successfully\nconst geo = $json.status === 'success' ? $json : null;\n\nconst HOME = ($env.HOME_COUNTRIES || 'United Kingdom').split(',').map(s => s.trim());\n\n// --- Scoring rules (tune these) ---\nlet score = alert.level * 4;                 // Wazuh level 0-15  ->  0-60\nconst reasons = [`Wazuh level ${alert.level}`];\n\nif (geo) {\n  if (geo.proxy)   { score += 25; reasons.push('proxy / VPN / Tor'); }\n  if (geo.hosting) { score += 15; reasons.push('datacenter / hosting'); }\n  if (!HOME.includes(geo.country)) { score += 10; reasons.push(`outside home countries (${geo.country})`); }\n} else if (alert.srcip && !alert.publicIp) {\n  reasons.push('internal source IP');\n}\nif (alert.groups.includes('attack')) { score += 10; reasons.push('rule group: attack'); }\n\nscore = Math.min(score, 100);\nconst severity = score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low';\n\n// Telegram uses HTML formatting, so escape anything that came from logs\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nreturn { json: {\n  ...alert,\n  country: geo?.country ?? null,\n  isp: geo?.isp ?? null,\n  score,\n  severity,\n  reasons,\n  safe: {\n    description: esc(alert.description),\n    agent: esc(alert.agent),\n    user: esc(alert.srcuser),\n    isp: esc(geo?.isp),\n    log: esc(alert.log.slice(0, 300)),\n  },\n} };"
+      },
       "id": "a0000000-0000-4000-8000-000000000005",
       "name": "Score Alert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         880,
-        300
-      ],
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// The normalised alert (reached back past the IP lookup)\nconst alert = $('Normalise Alert').item.json;\n// Geo data only exists if the alert went through \"Lookup IP\" successfully\nconst geo = $json.status === 'success' ? $json : null;\n\nconst HOME = ($env.HOME_COUNTRIES || 'United Kingdom').split(',').map(s => s.trim());\n\n// --- Scoring rules (tune these) ---\nlet score = alert.level * 4;                 // Wazuh level 0-15  ->  0-60\nconst reasons = [`Wazuh level ${alert.level}`];\n\nif (geo) {\n  if (geo.proxy)   { score += 25; reasons.push('proxy / VPN / Tor'); }\n  if (geo.hosting) { score += 15; reasons.push('datacenter / hosting'); }\n  if (!HOME.includes(geo.country)) { score += 10; reasons.push(`outside home countries (${geo.country})`); }\n} else if (alert.srcip && !alert.publicIp) {\n  reasons.push('internal source IP');\n}\nif (alert.groups.includes('attack')) { score += 10; reasons.push('rule group: attack'); }\n\nscore = Math.min(score, 100);\nconst severity = score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low';\n\n// Telegram uses HTML formatting, so escape anything that came from logs\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nreturn { json: {\n  ...alert,\n  country: geo?.country ?? null,\n  isp: geo?.isp ?? null,\n  score,\n  severity,\n  reasons,\n  safe: {\n    description: esc(alert.description),\n    agent: esc(alert.agent),\n    user: esc(alert.srcuser),\n    isp: esc(geo?.isp),\n    log: esc(alert.log.slice(0, 300)),\n  },\n} };"
-      }
+        304
+      ]
     },
     {
-      "id": "a0000000-0000-4000-8000-000000000006",
-      "name": "Dedupe",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1100,
-        300
-      ],
-      "parameters": {
-        "jsCode": "// Suppress repeats: same source (IP, or agent if no IP) + same rule within the window.\n// Workflow static data is only saved on production (published) runs, not editor test runs.\nconst WINDOW_MIN = 10;\nconst memory = $getWorkflowStaticData('global');\nmemory.seen = memory.seen || {};\nconst now = Date.now();\n\n// Forget entries older than the window\nfor (const [key, t] of Object.entries(memory.seen)) {\n  if (now - t > WINDOW_MIN * 60 * 1000) delete memory.seen[key];\n}\n\nreturn $input.all().map((item) => {\n  const a = item.json;\n  const key = `${a.srcip ?? a.agent}|${a.ruleId}`;\n  const duplicate = key in memory.seen;\n  if (!duplicate) memory.seen[key] = now;\n  return { json: { ...a, duplicate } };\n});"
-      }
-    },
-    {
-      "id": "a0000000-0000-4000-8000-000000000007",
-      "name": "Route",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3,
-      "position": [
-        1320,
-        300
-      ],
       "parameters": {
         "rules": {
           "values": [
@@ -128,7 +104,8 @@
                 "options": {
                   "caseSensitive": true,
                   "leftValue": "",
-                  "typeValidation": "strict"
+                  "typeValidation": "strict",
+                  "version": 1
                 },
                 "conditions": [
                   {
@@ -152,7 +129,8 @@
                 "options": {
                   "caseSensitive": true,
                   "leftValue": "",
-                  "typeValidation": "strict"
+                  "typeValidation": "strict",
+                  "version": 1
                 },
                 "conditions": [
                   {
@@ -175,7 +153,8 @@
                 "options": {
                   "caseSensitive": true,
                   "leftValue": "",
-                  "typeValidation": "strict"
+                  "typeValidation": "strict",
+                  "version": 1
                 },
                 "conditions": [
                   {
@@ -199,49 +178,123 @@
           "fallbackOutput": "extra",
           "renameFallbackOutput": "low"
         }
-      }
+      },
+      "id": "a0000000-0000-4000-8000-000000000007",
+      "name": "Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1768,
+        304
+      ]
     },
     {
+      "parameters": {},
       "id": "a0000000-0000-4000-8000-000000000008",
       "name": "Suppressed (duplicate)",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        1560,
-        100
-      ],
-      "parameters": {}
+        2008,
+        112
+      ]
     },
     {
-      "id": "a0000000-0000-4000-8000-000000000009",
-      "name": "Telegram Alert",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
-      "position": [
-        1560,
-        300
-      ],
-      "webhookId": "a0000000-0000-4000-8000-000000000066",
       "parameters": {
         "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
         "text": "={{ $json.severity === 'high' ? '🚨 <b>HIGH</b>' : '⚠️ <b>MEDIUM</b>' }} · score {{ $json.score }}/100\n<b>{{ $json.safe.description }}</b>\n\nAgent: {{ $json.safe.agent }}\nSource: <code>{{ $json.srcip || '-' }}</code>{{ $json.country ? ' (' + $json.country + ', ' + $json.safe.isp + ')' : '' }}\nUser: {{ $json.safe.user || '-' }}\nRule: {{ $json.ruleId }} (level {{ $json.level }}) · MITRE {{ $json.mitre.join(', ') || '-' }}\n\nWhy: {{ $json.reasons.join('; ') }}\n{{ $json.safe.log ? '<pre>' + $json.safe.log + '</pre>' : '' }}",
         "additionalFields": {
           "appendAttribution": false,
-          "parse_mode": "HTML",
-          "disable_notification": "={{ $json.severity !== 'high' }}"
+          "disable_notification": "={{ $json.severity !== 'high' }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "a0000000-0000-4000-8000-000000000009",
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2008,
+        304
+      ],
+      "webhookId": "a0000000-0000-4000-8000-000000000066",
+      "credentials": {
+        "telegramApi": {
+          "id": "MJIvNTROyF2tS2rd",
+          "name": "PurpleN8"
         }
       }
     },
     {
+      "parameters": {},
       "id": "a0000000-0000-4000-8000-00000000000a",
       "name": "Low: log only",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        1560,
-        500
+        2008,
+        512
+      ]
+    },
+    {
+      "id": "a0000000-0000-4000-8000-00000000000b",
+      "name": "Dedupe (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1100,
+        300
       ],
-      "parameters": {}
+      "credentials": {
+        "postgres": {
+          "id": "purplen8Postgres",
+          "name": "PurpleN8 Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Atomic dedupe: insert the key, or refresh it only if the last notification\n-- was more than 10 minutes ago. Concurrent alerts for the same key wait on the\n-- row lock, so only one of them can ever be \"new\".\nWITH sent AS (\n  INSERT INTO dedupe_window (key, last_sent) VALUES ($1, now())\n  ON CONFLICT (key) DO UPDATE SET last_sent = now()\n    WHERE dedupe_window.last_sent < now() - interval '10 minutes'\n  RETURNING 1\n)\nSELECT EXISTS (SELECT 1 FROM sent) AS is_new;",
+        "options": {
+          "queryReplacement": "={{ [($json.srcip ?? $json.agent) + '|' + $json.ruleId] }}"
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-00000000000c",
+      "name": "Decide Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Combine the scored alert with the dedupe result and decide what happens to it\nconst alert = $('Score Alert').item.json;\nconst duplicate = !$json.is_new;\nconst action = duplicate ? 'suppressed' : alert.severity === 'low' ? 'logged' : 'notified';\n\nreturn { json: {\n  ...alert,\n  duplicate,\n  action,\n  // Row for the audit log (keys match the alert_log columns)\n  logRecord: {\n    alert_id: alert.alertId, alert_time: alert.time, rule_id: alert.ruleId, level: alert.level,\n    description: alert.description, agent: alert.agent, srcip: alert.srcip, srcuser: alert.srcuser,\n    country: alert.country, isp: alert.isp, mitre: alert.mitre, score: alert.score,\n    severity: alert.severity, reasons: alert.reasons, action,\n  },\n} };"
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-00000000000d",
+      "name": "Audit Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1540,
+        60
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "purplen8Postgres",
+          "name": "PurpleN8 Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Write one audit row. The whole record is passed as a single JSON parameter.\nINSERT INTO alert_log (alert_id, alert_time, rule_id, level, description, agent, srcip, srcuser,\n                       country, isp, mitre, score, severity, reasons, action)\nSELECT alert_id, alert_time, rule_id, level, description, agent, srcip, srcuser,\n       country, isp, mitre, score, severity, reasons, action\nFROM jsonb_to_record($1::jsonb) AS r(\n  alert_id text, alert_time text, rule_id text, level int, description text, agent text,\n  srcip text, srcuser text, country text, isp text, mitre jsonb, score int,\n  severity text, reasons jsonb, action text);",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json.logRecord)] }}"
+        }
+      }
     }
   ],
   "connections": {
@@ -300,18 +353,7 @@
       "main": [
         [
           {
-            "node": "Dedupe",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Dedupe": {
-      "main": [
-        [
-          {
-            "node": "Route",
+            "node": "Dedupe (Postgres)",
             "type": "main",
             "index": 0
           }
@@ -349,6 +391,38 @@
           }
         ]
       ]
+    },
+    "Dedupe (Postgres)": {
+      "main": [
+        [
+          {
+            "node": "Decide Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Action": {
+      "main": [
+        [
+          {
+            "node": "Audit Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
-  }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "active": false
 }
