@@ -1,3 +1,4 @@
 *.sh text eol=lf
 soar/wazuh-integration/custom-n8n text eol=lf
 *.py text eol=lf
+victim/purplen8-unblock text eol=lf

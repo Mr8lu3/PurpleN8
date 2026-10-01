@@ -6,7 +6,8 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "wazuh-alert",
-        "options": {}
+        "options": {},
+        "authentication": "headerAuth"
       },
       "id": "a0000000-0000-4000-8000-000000000001",
       "name": "Wazuh Alert",
@@ -16,7 +17,13 @@
         0,
         304
       ],
-      "webhookId": "a0000000-0000-4000-8000-000000000065"
+      "webhookId": "a0000000-0000-4000-8000-000000000065",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "purplen8WebhookTok",
+          "name": "Wazuh webhook token"
+        }
+      }
     },
     {
       "parameters": {
@@ -68,7 +75,7 @@
     },
     {
       "parameters": {
-        "url": "=http://ip-api.com/json/{{ $json.srcip }}?fields=status,message,country,city,isp,proxy,hosting,query",
+        "url": "=http://enrich:8080/lookup/{{ $json.srcip }}",
         "options": {}
       },
       "id": "a0000000-0000-4000-8000-000000000004",
@@ -84,7 +91,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// The normalised alert (reached back past the IP lookup)\nconst alert = $('Normalise Alert').item.json;\n// Geo data only exists if the alert went through \"Lookup IP\" successfully\nconst geo = $json.status === 'success' ? $json : null;\n\nconst HOME = ($env.HOME_COUNTRIES || 'United Kingdom').split(',').map(s => s.trim());\n\n// --- Scoring rules (tune these) ---\nlet score = alert.level * 4;                 // Wazuh level 0-15  ->  0-60\nconst reasons = [`Wazuh level ${alert.level}`];\n\nif (geo) {\n  if (geo.proxy)   { score += 25; reasons.push('proxy / VPN / Tor'); }\n  if (geo.hosting) { score += 15; reasons.push('datacenter / hosting'); }\n  if (!HOME.includes(geo.country)) { score += 10; reasons.push(`outside home countries (${geo.country})`); }\n} else if (alert.srcip && !alert.publicIp) {\n  reasons.push('internal source IP');\n}\nif (alert.groups.includes('attack')) { score += 10; reasons.push('rule group: attack'); }\n\nscore = Math.min(score, 100);\nconst severity = score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low';\n\n// Telegram uses HTML formatting, so escape anything that came from logs\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nreturn { json: {\n  ...alert,\n  country: geo?.country ?? null,\n  isp: geo?.isp ?? null,\n  score,\n  severity,\n  reasons,\n  safe: {\n    description: esc(alert.description),\n    agent: esc(alert.agent),\n    user: esc(alert.srcuser),\n    isp: esc(geo?.isp),\n    log: esc(alert.log.slice(0, 300)),\n  },\n} };"
+        "jsCode": "// The normalised alert (reached back past the IP lookup)\nconst alert = $('Normalise Alert').item.json;\n// Enrichment only exists if the alert went through \"Lookup IP\" successfully\nconst geo = $json.status === 'success' ? $json : null;\n\nconst HOME = ($env.HOME_COUNTRIES || 'United Kingdom').split(',').map(s => s.trim());\n\n// --- Scoring rules (tune these) ---\nlet score = alert.level * 4;                 // Wazuh level 0-15  ->  0-60\nconst reasons = [`Wazuh level ${alert.level}`];\n\nif (geo) {\n  if (geo.tor)     { score += 30; reasons.push('Tor exit node'); }\n  if (geo.hosting) { score += 15; reasons.push('datacenter / hosting'); }\n  if (geo.country && !HOME.includes(geo.country)) { score += 10; reasons.push(`outside home countries (${geo.country})`); }\n} else if (alert.srcip && !alert.publicIp) {\n  reasons.push('internal source IP');\n}\nif (alert.groups.includes('attack')) { score += 10; reasons.push('rule group: attack'); }\n\nscore = Math.min(score, 100);\nconst severity = score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low';\n\n// Escape anything that came from logs before it goes into a Telegram message\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');   // HTML\nconst md  = (s) => String(s ?? '').replace(/[&<>]/g, '').replace(/([_*`\\[])/g, '\\\\$1');                // Markdown\n\nreturn { json: {\n  ...alert,\n  country: geo?.country ?? null,\n  isp: geo?.isp ?? null,\n  score,\n  severity,\n  reasons,\n  safe: {\n    description: esc(alert.description),\n    agent: esc(alert.agent),\n    user: esc(alert.srcuser),\n    isp: esc(geo?.isp),\n    log: esc(alert.log.slice(0, 300)),\n  },\n  md: {\n    description: md(alert.description),\n    agent: md(alert.agent),\n    user: md(alert.srcuser),\n    place: geo?.country ? md(`${geo.country}, ${geo.isp}`) : '',\n    reasons: md(reasons.join('; ')),\n  },\n} };"
       },
       "id": "a0000000-0000-4000-8000-000000000005",
       "name": "Score Alert",
@@ -109,7 +116,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "a0000000-0000-4000-8000-0000000000ca",
+                    "id": "a0000000-0000-4000-8000-000000000101",
                     "leftValue": "={{ $json.duplicate }}",
                     "rightValue": "",
                     "operator": {
@@ -134,19 +141,29 @@
                 },
                 "conditions": [
                   {
-                    "id": "a0000000-0000-4000-8000-0000000000cb",
+                    "id": "a0000000-0000-4000-8000-000000000102",
                     "leftValue": "={{ $json.severity }}",
                     "rightValue": "high",
                     "operator": {
                       "type": "string",
                       "operation": "equals"
                     }
+                  },
+                  {
+                    "id": "a0000000-0000-4000-8000-000000000103",
+                    "leftValue": "={{ $json.publicIp }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
                   }
                 ],
                 "combinator": "and"
               },
               "renameOutput": true,
-              "outputKey": "high"
+              "outputKey": "respond"
             },
             {
               "conditions": {
@@ -158,19 +175,19 @@
                 },
                 "conditions": [
                   {
-                    "id": "a0000000-0000-4000-8000-0000000000cc",
+                    "id": "a0000000-0000-4000-8000-000000000104",
                     "leftValue": "={{ $json.severity }}",
-                    "rightValue": "medium",
+                    "rightValue": "low",
                     "operator": {
                       "type": "string",
-                      "operation": "equals"
+                      "operation": "notEquals"
                     }
                   }
                 ],
                 "combinator": "and"
               },
               "renameOutput": true,
-              "outputKey": "medium"
+              "outputKey": "notify"
             }
           ]
         },
@@ -196,7 +213,7 @@
       "typeVersion": 1,
       "position": [
         2008,
-        112
+        372
       ]
     },
     {
@@ -215,13 +232,13 @@
       "typeVersion": 1.2,
       "position": [
         2008,
-        304
+        564
       ],
       "webhookId": "a0000000-0000-4000-8000-000000000066",
       "credentials": {
         "telegramApi": {
-          "id": "MJIvNTROyF2tS2rd",
-          "name": "PurpleN8"
+          "id": "purplen8Telegram",
+          "name": "PurpleN8 Telegram bot"
         }
       }
     },
@@ -233,7 +250,7 @@
       "typeVersion": 1,
       "position": [
         2008,
-        512
+        772
       ]
     },
     {
@@ -255,7 +272,7 @@
         "operation": "executeQuery",
         "query": "-- Atomic dedupe: insert the key, or refresh it only if the last notification\n-- was more than 10 minutes ago. Concurrent alerts for the same key wait on the\n-- row lock, so only one of them can ever be \"new\".\nWITH sent AS (\n  INSERT INTO dedupe_window (key, last_sent) VALUES ($1, now())\n  ON CONFLICT (key) DO UPDATE SET last_sent = now()\n    WHERE dedupe_window.last_sent < now() - interval '10 minutes'\n  RETURNING 1\n)\nSELECT EXISTS (SELECT 1 FROM sent) AS is_new;",
         "options": {
-          "queryReplacement": "={{ [($json.srcip ?? $json.agent) + '|' + $json.ruleId] }}"
+          "queryReplacement": "={{ [($json.srcip ? $json.srcip : $json.agent + '|' + $json.description) + '|' + $json.ruleId] }}"
         }
       }
     },
@@ -293,6 +310,378 @@
         "query": "-- Write one audit row. The whole record is passed as a single JSON parameter.\nINSERT INTO alert_log (alert_id, alert_time, rule_id, level, description, agent, srcip, srcuser,\n                       country, isp, mitre, score, severity, reasons, action)\nSELECT alert_id, alert_time, rule_id, level, description, agent, srcip, srcuser,\n       country, isp, mitre, score, severity, reasons, action\nFROM jsonb_to_record($1::jsonb) AS r(\n  alert_id text, alert_time text, rule_id text, level int, description text, agent text,\n  srcip text, srcuser text, country text, isp text, mitre jsonb, score int,\n  severity text, reasons jsonb, action text);",
         "options": {
           "queryReplacement": "={{ [JSON.stringify($json.logRecord)] }}"
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000101",
+      "name": "Ask: Block?",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2028,
+        60
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "purplen8Telegram",
+          "name": "PurpleN8 Telegram bot"
+        }
+      },
+      "webhookId": "a0000000-0000-4000-8000-000000000170",
+      "parameters": {
+        "operation": "sendAndWait",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "message": "=🚨 *HIGH* · score {{ $json.score }}/100\n*{{ $json.md.description }}*\n\nAgent: {{ $json.md.agent }}\nSource: `{{ $json.srcip }}`{{ $json.md.place ? ' (' + $json.md.place + ')' : '' }}\nUser: {{ $json.md.user || '-' }}\nRule: {{ $json.ruleId }} (level {{ $json.level }}) · MITRE {{ $json.mitre.join(', ') || '-' }}\nWhy: {{ $json.md.reasons }}\n\nBlock {{ $json.srcip }} on all agents for {{ $env.BLOCK_MINUTES || 60 }} min?\n_No answer within 30 min counts as ignore._",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "approveLabel": "🛑 Block",
+            "disapproveLabel": "✅ Ignore"
+          }
+        },
+        "options": {
+          "appendAttribution": false,
+          "limitWaitTime": {
+            "values": {
+              "limitType": "afterTimeInterval",
+              "resumeAmount": 30,
+              "resumeUnit": "minutes"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000102",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2248,
+        60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "a0000000-0000-4000-8000-000000000105",
+              "leftValue": "={{ $json.data?.approved === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000112",
+      "name": "Block IP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2468,
+        -60
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wazuhActResp0001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "command": "!firewall-drop",
+            "srcip": "={{ $('Decide Action').first().json.srcip }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "command",
+              "displayName": "command",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "srcip",
+              "displayName": "srcip",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000113",
+      "name": "Record Block",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2688,
+        -60
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "purplen8Postgres",
+          "name": "PurpleN8 Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO response_log (alert_id, srcip, action, detail) VALUES ($1, $2, $3, $4);",
+        "options": {
+          "queryReplacement": "={{ [$('Decide Action').first().json.alertId, $('Decide Action').first().json.srcip, $json.ok ? 'blocked' : 'block_failed', ($json.message || 'sub-workflow error') + ($json.agents ? ' agents=' + $json.agents.join(',') : '')] }}"
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000104",
+      "name": "Blocked OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2908,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "a0000000-0000-4000-8000-000000000106",
+              "leftValue": "={{ $('Block IP').first().json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000115",
+      "name": "Notify Blocked",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3128,
+        -160
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "purplen8Telegram",
+          "name": "PurpleN8 Telegram bot"
+        }
+      },
+      "webhookId": "a0000000-0000-4000-8000-000000000185",
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🛑 <b>Blocked</b> <code>{{ $('Decide Action').first().json.srcip }}</code> on agents {{ $('Block IP').first().json.agents.join(', ') }} for {{ $env.BLOCK_MINUTES || 60 }} min.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000105",
+      "name": "Wait (block duration)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3348,
+        -160
+      ],
+      "webhookId": "a0000000-0000-4000-8000-000000000171",
+      "parameters": {
+        "amount": "={{ Number($env.BLOCK_MINUTES || 60) }}",
+        "unit": "minutes"
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000117",
+      "name": "Unblock IP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3568,
+        -160
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wazuhActResp0001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "command": "!purplen8-unblock",
+            "srcip": "={{ $('Decide Action').first().json.srcip }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "command",
+              "displayName": "command",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "srcip",
+              "displayName": "srcip",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000118",
+      "name": "Record Unblock",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3788,
+        -160
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "purplen8Postgres",
+          "name": "PurpleN8 Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO response_log (alert_id, srcip, action, detail) VALUES ($1, $2, $3, $4);",
+        "options": {
+          "queryReplacement": "={{ [$('Decide Action').first().json.alertId, $('Decide Action').first().json.srcip, $json.ok ? 'unblocked' : 'unblock_failed', ($json.message || 'sub-workflow error') + ($json.agents ? ' agents=' + $json.agents.join(',') : '')] }}"
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000119",
+      "name": "Notify Unblocked",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4008,
+        -160
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "purplen8Telegram",
+          "name": "PurpleN8 Telegram bot"
+        }
+      },
+      "webhookId": "a0000000-0000-4000-8000-000000000189",
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🔓 <b>Block expired</b> for <code>{{ $('Decide Action').first().json.srcip }}</code>: {{ $('Unblock IP').first().json.ok ? 'removed from all agents' : 'unblock FAILED, check Wazuh' }}.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000120",
+      "name": "Notify Block Failed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3128,
+        40
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "purplen8Telegram",
+          "name": "PurpleN8 Telegram bot"
+        }
+      },
+      "webhookId": "a0000000-0000-4000-8000-000000000190",
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ <b>Block failed</b> for <code>{{ $('Decide Action').first().json.srcip }}</code>: {{ $('Block IP').first().json.message || 'sub-workflow error' }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-000000000121",
+      "name": "Record Dismissed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2468,
+        160
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "purplen8Postgres",
+          "name": "PurpleN8 Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO response_log (alert_id, srcip, action, detail) VALUES ($1, $2, $3, $4);",
+        "options": {
+          "queryReplacement": "={{ [$('Decide Action').first().json.alertId, $('Decide Action').first().json.srcip, $json.data?.respondedAt ? 'dismissed' : 'no_response', ($json.data?.respondedAt ? 'analyst chose Ignore in Telegram' : 'no answer within 30 min, treated as ignore')] }}"
         }
       }
     }
@@ -371,7 +760,7 @@
         ],
         [
           {
-            "node": "Telegram Alert",
+            "node": "Ask: Block?",
             "type": "main",
             "index": 0
           }
@@ -413,6 +802,119 @@
           },
           {
             "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask: Block?": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Block IP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Dismissed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Block IP": {
+      "main": [
+        [
+          {
+            "node": "Record Block",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Block": {
+      "main": [
+        [
+          {
+            "node": "Blocked OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blocked OK?": {
+      "main": [
+        [
+          {
+            "node": "Notify Blocked",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Block Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Blocked": {
+      "main": [
+        [
+          {
+            "node": "Wait (block duration)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait (block duration)": {
+      "main": [
+        [
+          {
+            "node": "Unblock IP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unblock IP": {
+      "main": [
+        [
+          {
+            "node": "Record Unblock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Unblock": {
+      "main": [
+        [
+          {
+            "node": "Notify Unblocked",
             "type": "main",
             "index": 0
           }

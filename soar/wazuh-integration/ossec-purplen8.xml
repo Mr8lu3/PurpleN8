@@ -1,17 +1,20 @@
-<!-- PurpleN8 additions. Appended to /var/ossec/etc/ossec.conf by install.sh
+<!-- PurpleN8 BEGIN: appended to /var/ossec/etc/ossec.conf by install.sh
      (Wazuh allows multiple <ossec_config> sections in one file). -->
 <ossec_config>
-  <!-- Forward alerts of level 5+ to the n8n triage workflow -->
+  <!-- Forward alerts of level 5+ to the n8n triage workflow.
+       api_key is sent as the X-PurpleN8-Token header; install.sh fills it from .env -->
   <integration>
     <name>custom-n8n</name>
     <hook_url>http://n8n:5678/webhook/wazuh-alert</hook_url>
+    <api_key>__WEBHOOK_TOKEN__</api_key>
     <level>5</level>
     <alert_format>json</alert_format>
   </integration>
 
-  <!-- Lab log used by scripts/simulate-ssh-bruteforce.sh -->
+  <!-- Lab log used by scripts/simulate-ssh-bruteforce.sh (if run against the manager) -->
   <localfile>
     <log_format>syslog</log_format>
     <location>/var/log/purplen8/auth.log</location>
   </localfile>
 </ossec_config>
+<!-- PurpleN8 END -->

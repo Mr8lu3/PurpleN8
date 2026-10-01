@@ -1,0 +1,16 @@
+#!/bin/sh
+# Wazuh active response: remove the iptables block that firewall-drop added.
+# Wazuh passes a JSON message on stdin containing parameters.alert.data.srcip.
+LOG=/var/ossec/logs/active-responses.log
+read -r INPUT
+IP=$(printf '%s' "$INPUT" | sed -n 's/.*"srcip"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+
+# Strict validation before the value reaches iptables: dotted IPv4 only
+if ! printf '%s' "$IP" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+  echo "$(date '+%Y/%m/%d %H:%M:%S') purplen8-unblock: rejected invalid srcip" >> "$LOG"
+  exit 1
+fi
+
+while iptables -D INPUT -s "$IP" -j DROP 2>/dev/null; do :; done
+while iptables -D FORWARD -s "$IP" -j DROP 2>/dev/null; do :; done
+echo "$(date '+%Y/%m/%d %H:%M:%S') purplen8-unblock: removed block for $IP" >> "$LOG"

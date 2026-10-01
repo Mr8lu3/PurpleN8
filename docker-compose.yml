@@ -2,6 +2,9 @@
 #   n8n            workflow engine     http://localhost:5678
 #   wazuh.manager  SIEM manager        forwards alerts to n8n (see soar/wazuh-integration)
 #   postgres       database            alert audit log + dedupe (see db/init.sql)
+#   enrich         IP enrichment       offline geo/ASN/Tor lookups - no alert data leaves the machine
+#   victim         lab server          Ubuntu + Wazuh agent; target of simulations and blocks
+#   juice-shop     pentest lab target  OWASP Juice Shop (only with: docker compose --profile pentest up -d)
 #
 # The Wazuh manager runs on its own (no indexer/dashboard) to keep RAM low (~300 MB).
 # Alerts are still written to /var/ossec/logs/alerts/alerts.json inside the container.
@@ -13,13 +16,18 @@ services:
     container_name: purplen8-n8n
     restart: unless-stopped
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"     # this PC only; see README to expose on your LAN
     env_file: .env
     environment:
       - GENERIC_TIMEZONE=Europe/London
       - N8N_SECURE_COOKIE=false
       # lets workflows read TELEGRAM_CHAT_ID etc. via $env
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # Base URL used in Telegram approval buttons. Telegram rejects "localhost",
+      # so default to 127.0.0.1 (works from Telegram Desktop on this PC only).
+      - WEBHOOK_URL=${N8N_PUBLIC_URL:-http://127.0.0.1:5678/}
+      # Workflows may only read/write files in the reports folder
+      - N8N_RESTRICT_FILE_ACCESS_TO=/files/pentest/reports
     volumes:
       - n8n_data:/home/node/.n8n
       - ./:/files
@@ -36,6 +44,14 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
+  enrich:
+    build: ./enrich
+    container_name: purplen8-enrich
+    restart: unless-stopped
+    # no ports published: only reachable by n8n on the internal network
+    volumes:
+      - enrich_data:/data
+
   wazuh.manager:
     image: wazuh/wazuh-manager:4.9.2
     container_name: purplen8-wazuh-manager
@@ -44,9 +60,9 @@ services:
     ulimits:
       memlock: { soft: -1, hard: -1 }
       nofile: { soft: 655360, hard: 655360 }
-    ports:
-      - "1514:1514"     # agent events
-      - "1515:1515"     # agent enrollment
+    # No ports published: the lab victim reaches the manager on the internal Docker network.
+    # To enroll agents on other machines, publish 1514 (events) and 1515 (enrollment), e.g.
+    #   ports: ["0.0.0.0:1514:1514", "0.0.0.0:1515:1515"]
     volumes:
       - wazuh_etc:/var/ossec/etc
       - wazuh_logs:/var/ossec/logs
@@ -54,6 +70,30 @@ services:
       - wazuh_integrations:/var/ossec/integrations
       - wazuh_active_response:/var/ossec/active-response/bin
       - wazuh_api_configuration:/var/ossec/api/configuration
+
+  victim:
+    build: ./victim
+    container_name: purplen8-victim
+    hostname: victim-web-01
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN        # lets Wazuh's firewall-drop add iptables rules
+    environment:
+      WAZUH_AGENT_NAME: victim-web-01
+    volumes:
+      - victim_ossec_etc:/var/ossec/etc     # keeps the agent's enrollment key across rebuilds
+    depends_on:
+      - wazuh.manager
+
+  juice-shop:
+    # Deliberately vulnerable web app used as the pentest lab target.
+    # Bound to 127.0.0.1 so it is never exposed to your network.
+    image: bkimminich/juice-shop
+    container_name: purplen8-juice-shop
+    restart: unless-stopped
+    profiles: ["pentest"]
+    ports:
+      - "127.0.0.1:3000:3000"
 
 volumes:
   n8n_data:
@@ -65,3 +105,5 @@ volumes:
   wazuh_active_response:
   wazuh_api_configuration:
   postgres_data:
+  enrich_data:
+  victim_ossec_etc:

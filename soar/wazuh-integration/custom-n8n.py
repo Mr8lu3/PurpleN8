@@ -5,7 +5,7 @@ Wazuh -> n8n integration.
 Wazuh's integratord calls this script for every alert that matches the
 <integration> block in ossec.conf, with these arguments:
     argv[1]  path to a temp file containing the alert (JSON)
-    argv[2]  api_key   (unused here)
+    argv[2]  api_key   shared secret, sent as the X-PurpleN8-Token header
     argv[3]  hook_url  (the n8n webhook URL)
 
 The alert is forwarded unchanged; all parsing and scoring happens in n8n.
@@ -30,14 +30,14 @@ def main(args):
         log(f"wrong arguments: {args}")
         sys.exit(1)
 
-    alert_file, hook_url = args[1], args[3]
+    alert_file, token, hook_url = args[1], args[2], args[3]
     with open(alert_file) as f:
         alert = json.load(f)
 
     req = urllib.request.Request(
         hook_url,
         data=json.dumps(alert).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "X-PurpleN8-Token": token},
         method="POST",
     )
     try:
