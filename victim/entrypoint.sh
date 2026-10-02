@@ -18,5 +18,15 @@ grep -q "/var/log/purplen8/auth.log" "$CONF" || cat >> "$CONF" <<'XML'
 </ossec_config>
 XML
 
+# Watch the lab web server's access log (written by the juice-shop proxy)
+grep -q "/var/log/purplen8-web/access.log" "$CONF" || cat >> "$CONF" <<'XML'
+<ossec_config>
+  <localfile>
+    <log_format>apache</log_format>
+    <location>/var/log/purplen8-web/access.log</location>
+  </localfile>
+</ossec_config>
+XML
+
 /var/ossec/bin/wazuh-control start
 exec tail -F /var/ossec/logs/ossec.log

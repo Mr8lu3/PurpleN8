@@ -1,16 +1,50 @@
 {
   "timestamp": "2026-10-01T14:05:40.019+0000",
   "rule": {
-    "level": 7, "id": "31103", "firedtimes": 1,
+    "level": 6,
+    "id": "31164",
+    "firedtimes": 1,
     "description": "SQL injection attempt.",
-    "groups": ["web", "accesslog", "attack", "sql_injection"],
-    "mitre": { "id": ["T1190"], "tactic": ["Initial Access"], "technique": ["Exploit Public-Facing Application"] }
+    "groups": [
+      "web",
+      "accesslog",
+      "attack",
+      "sqlinjection"
+    ],
+    "mitre": {
+      "id": [
+        "T1055",
+        "T1190"
+      ],
+      "tactic": [
+        "Defense Evasion",
+        "Privilege Escalation",
+        "Initial Access"
+      ],
+      "technique": [
+        "Process Injection",
+        "Exploit Public-Facing Application"
+      ]
+    }
   },
-  "agent": { "id": "001", "name": "web-server-01", "ip": "10.0.1.15" },
-  "manager": { "name": "wazuh.manager" },
+  "agent": {
+    "id": "001",
+    "name": "web-server-01",
+    "ip": "10.0.1.15"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
   "id": "1759327540.2002",
   "full_log": "167.94.138.35 - - [01/Oct/2026:14:05:40 +0000] \"GET /products?id=1%27%20OR%20%271%27=%271 HTTP/1.1\" 200 512 \"-\" \"Mozilla/5.0\"",
-  "decoder": { "name": "web-accesslog" },
-  "data": { "srcip": "167.94.138.35", "protocol": "GET", "url": "/products?id=1%27%20OR%20%271%27=%271", "id": "200" },
+  "decoder": {
+    "name": "web-accesslog"
+  },
+  "data": {
+    "srcip": "167.94.138.35",
+    "protocol": "GET",
+    "url": "/products?id=1%27%20OR%20%271%27=%271",
+    "id": "200"
+  },
   "location": "/var/log/nginx/access.log"
 }

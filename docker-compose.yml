@@ -4,7 +4,8 @@
 #   postgres       database            alert audit log + dedupe (see db/init.sql)
 #   enrich         IP enrichment       offline geo/ASN/Tor lookups - no alert data leaves the machine
 #   victim         lab server          Ubuntu + Wazuh agent; target of simulations and blocks
-#   juice-shop     pentest lab target  OWASP Juice Shop (only with: docker compose --profile pentest up -d)
+#   juice-shop     pentest lab target  nginx (access log -> Wazuh) in front of OWASP Juice Shop
+#                                      (only with: docker compose --profile pentest up -d)
 #
 # The Wazuh manager runs on its own (no indexer/dashboard) to keep RAM low (~300 MB).
 # Alerts are still written to /var/ossec/logs/alerts/alerts.json inside the container.
@@ -82,18 +83,33 @@ services:
       WAZUH_AGENT_NAME: victim-web-01
     volumes:
       - victim_ossec_etc:/var/ossec/etc     # keeps the agent's enrollment key across rebuilds
+      - web_logs:/var/log/purplen8-web:ro   # lab web server access log (purple-team loop)
     depends_on:
       - wazuh.manager
 
-  juice-shop:
+  juice-shop-app:
     # Deliberately vulnerable web app used as the pentest lab target.
-    # Bound to 127.0.0.1 so it is never exposed to your network.
+    # Not published: reached only through the logging proxy below.
     image: bkimminich/juice-shop
+    container_name: purplen8-juice-shop-app
+    restart: unless-stopped
+    profiles: ["pentest"]
+
+  juice-shop:
+    # Logging reverse proxy: same URL for testers (http://juice-shop:3000), and every
+    # request lands in an access log that the victim's Wazuh agent monitors.
+    # Bound to 127.0.0.1 so the lab target is never exposed to your network.
+    image: nginx:alpine
     container_name: purplen8-juice-shop
     restart: unless-stopped
     profiles: ["pentest"]
+    depends_on:
+      - juice-shop-app
     ports:
       - "127.0.0.1:3000:3000"
+    volumes:
+      - ./pentest/proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - web_logs:/var/log/purplen8-web
 
 volumes:
   n8n_data:
@@ -107,3 +123,4 @@ volumes:
   postgres_data:
   enrich_data:
   victim_ossec_etc:
+  web_logs:

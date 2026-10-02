@@ -1,15 +1,50 @@
 {
   "timestamp": "2026-10-01T14:07:02.733+0000",
   "rule": {
-    "level": 5, "id": "60122", "firedtimes": 1,
+    "level": 5,
+    "id": "60122",
+    "firedtimes": 1,
     "description": "Logon Failure - Unknown user or bad password",
-    "groups": ["windows", "windows_security", "authentication_failed"],
-    "mitre": { "id": ["T1078"], "tactic": ["Defense Evasion", "Persistence", "Privilege Escalation", "Initial Access"], "technique": ["Valid Accounts"] }
+    "groups": [
+      "windows",
+      "windows_security",
+      "authentication_failed"
+    ],
+    "mitre": {
+      "id": [
+        "T1531"
+      ],
+      "tactic": [
+        "Impact"
+      ],
+      "technique": [
+        "Account Access Removal"
+      ]
+    }
   },
-  "agent": { "id": "002", "name": "ricky-windows", "ip": "10.0.1.20" },
-  "manager": { "name": "wazuh.manager" },
+  "agent": {
+    "id": "002",
+    "name": "ricky-windows",
+    "ip": "10.0.1.20"
+  },
+  "manager": {
+    "name": "wazuh.manager"
+  },
   "id": "1759327622.3003",
-  "decoder": { "name": "windows_eventchannel" },
-  "data": { "win": { "system": { "eventID": "4625" }, "eventdata": { "ipAddress": "81.2.69.142", "targetUserName": "ricky", "logonType": "10" } } },
+  "decoder": {
+    "name": "windows_eventchannel"
+  },
+  "data": {
+    "win": {
+      "system": {
+        "eventID": "4625"
+      },
+      "eventdata": {
+        "ipAddress": "81.2.69.142",
+        "targetUserName": "ricky",
+        "logonType": "10"
+      }
+    }
+  },
   "location": "EventChannel"
 }

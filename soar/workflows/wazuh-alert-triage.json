@@ -28,7 +28,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Pull the fields we care about out of a raw Wazuh alert.\n// Wazuh stores the source IP in different places depending on the log type.\nconst a = $json.body;\nconst d = a.data || {};\nconst srcip = d.srcip || d.src_ip || d.win?.eventdata?.ipAddress || null;\n\n// RFC1918 / loopback / link-local addresses can't be looked up publicly\nconst isPrivate = (ip) =>\n  /^(10\\.|127\\.|192\\.168\\.|172\\.(1[6-9]|2\\d|3[01])\\.|169\\.254\\.)/.test(ip) || ip === '::1' || ip === '-';\n\nreturn { json: {\n  alertId: a.id,\n  time: a.timestamp,\n  ruleId: a.rule?.id,\n  level: Number(a.rule?.level ?? 0),\n  description: a.rule?.description ?? 'Unknown rule',\n  groups: a.rule?.groups ?? [],\n  mitre: a.rule?.mitre?.id ?? [],\n  agent: a.agent?.name ?? 'unknown',\n  srcip,\n  srcuser: d.srcuser || d.dstuser || d.win?.eventdata?.targetUserName || null,\n  log: a.full_log ?? '',\n  publicIp: !!srcip && !isPrivate(srcip),\n} };"
+        "jsCode": "// Pull the fields we care about out of a raw Wazuh alert.\n// Wazuh stores the source IP in different places depending on the log type.\nconst a = $json.body;\nconst d = a.data || {};\nconst srcip = d.srcip || d.src_ip || d.win?.eventdata?.ipAddress || null;\n\n// RFC1918 / loopback / link-local addresses can't be looked up publicly\nconst isPrivate = (ip) =>\n  /^(10\\.|127\\.|192\\.168\\.|172\\.(1[6-9]|2\\d|3[01])\\.|169\\.254\\.)/.test(ip) || ip === '::1' || ip === '-';\n\nreturn { json: {\n  alertId: a.id,\n  time: a.timestamp,\n  ruleId: a.rule?.id,\n  level: Number(a.rule?.level ?? 0),\n  description: a.rule?.description ?? 'Unknown rule',\n  groups: a.rule?.groups ?? [],\n  mitre: a.rule?.mitre?.id ?? [],\n  agent: a.agent?.name ?? 'unknown',\n  srcip,\n  srcuser: d.srcuser || d.dstuser || d.win?.eventdata?.targetUserName || null,\n  log: a.full_log ?? '',\n  publicIp: !!srcip && !isPrivate(srcip),\n  // Set by tests/integration.sh: scored and audited, but never notified or acted on\n  dryRun: a.purplen8_dry_run === true,\n} };"
       },
       "id": "a0000000-0000-4000-8000-000000000002",
       "name": "Normalise Alert",
@@ -106,6 +106,31 @@
       "parameters": {
         "rules": {
           "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "a0000000-0000-4000-8000-0000000001f0",
+                    "leftValue": "={{ $json.dryRun }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "dry run"
+            },
             {
               "conditions": {
                 "options": {
@@ -287,7 +312,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Combine the scored alert with the dedupe result and decide what happens to it\nconst alert = $('Score Alert').item.json;\nconst duplicate = !$json.is_new;\nconst action = duplicate ? 'suppressed' : alert.severity === 'low' ? 'logged' : 'notified';\n\nreturn { json: {\n  ...alert,\n  duplicate,\n  action,\n  // Row for the audit log (keys match the alert_log columns)\n  logRecord: {\n    alert_id: alert.alertId, alert_time: alert.time, rule_id: alert.ruleId, level: alert.level,\n    description: alert.description, agent: alert.agent, srcip: alert.srcip, srcuser: alert.srcuser,\n    country: alert.country, isp: alert.isp, mitre: alert.mitre, score: alert.score,\n    severity: alert.severity, reasons: alert.reasons, action,\n  },\n} };"
+        "jsCode": "// Combine the scored alert with the dedupe result and decide what happens to it\nconst alert = $('Score Alert').item.json;\nconst duplicate = !$json.is_new;\nconst decided = duplicate ? 'suppressed' : alert.severity === 'low' ? 'logged' : 'notified';\n// Test runs (tests/integration.sh) are audited with what *would* have happened\nconst action = alert.dryRun ? `dry_run(${decided})` : decided;\n\nreturn { json: {\n  ...alert,\n  duplicate,\n  action,\n  // Row for the audit log (keys match the alert_log columns)\n  logRecord: {\n    alert_id: alert.alertId, alert_time: alert.time, rule_id: alert.ruleId, level: alert.level,\n    description: alert.description, agent: alert.agent, srcip: alert.srcip, srcuser: alert.srcuser,\n    country: alert.country, isp: alert.isp, mitre: alert.mitre, score: alert.score,\n    severity: alert.severity, reasons: alert.reasons, action,\n  },\n} };"
       }
     },
     {
@@ -684,6 +709,17 @@
           "queryReplacement": "={{ [$('Decide Action').first().json.alertId, $('Decide Action').first().json.srcip, $json.data?.respondedAt ? 'dismissed' : 'no_response', ($json.data?.respondedAt ? 'analyst chose Ignore in Telegram' : 'no answer within 30 min, treated as ignore')] }}"
         }
       }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-0000000001f1",
+      "name": "Dry run (test)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2008,
+        232
+      ],
+      "parameters": {}
     }
   ],
   "connections": {
@@ -751,6 +787,13 @@
     },
     "Route": {
       "main": [
+        [
+          {
+            "node": "Dry run (test)",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Suppressed (duplicate)",

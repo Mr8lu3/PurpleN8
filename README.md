@@ -1,5 +1,7 @@
 # PurpleN8
 
+[![CI](https://github.com/Mr8lu3/PurpleN8/actions/workflows/ci.yml/badge.svg)](https://github.com/Mr8lu3/PurpleN8/actions/workflows/ci.yml)
+
 **A local-first security automation lab built with n8n and Wazuh.**
 Wazuh detects, n8n triages, an analyst approves a block from Telegram, and every alert and decision is written to a local audit log.
 
@@ -9,6 +11,9 @@ It has two halves, for the blue and red sides of security work:
 
 - **SOAR (blue):** Wazuh alert triage, scoring, deduplication and human-in-the-loop blocking.
 - **Pentest engagement assistant (red):** an authorisation and scope gate, a non-intrusive configuration review, findings tracking, a manual-testing checklist and a Markdown report, run against your own lab.
+- **The purple loop:** the lab web server's access log feeds Wazuh, so activity during an engagement reaches the SOAR side. The report shows which activity was **detected** and how it was handled.
+
+It's backed by [unit, integration and CI tests](#testing) and a [threat model](docs/THREAT-MODEL.md) of the lab itself.
 
 ---
 
@@ -79,7 +84,8 @@ flowchart LR
 - **Non-intrusive checks:** one ordinary GET of each target's home page and `/.well-known/security.txt`. Headers and cookies are compared with the [OWASP Secure Headers Project](https://owasp.org/www-project-secure-headers/) guidance: HTTPS, HSTS, CSP, clickjacking protection, `nosniff`, Referrer-Policy, Permissions-Policy, CORS, version disclosure, cookie flags and security.txt. **No attack payloads are sent.**
 - **Severity** uses a simple qualitative rubric (info / low / medium / high). It is **not CVSS**.
 - **Output:** rows in `findings`, a 10-item OWASP Top 10 (2021) manual-testing `checklist` per engagement, a Markdown report in `pentest/reports/` (git-ignored) and a Telegram summary.
-- **Lab target:** [OWASP Juice Shop](https://owasp.org/www-project-juice-shop/), a deliberately vulnerable app. It runs only when you ask for it (`--profile pentest`) and is bound to `127.0.0.1`.
+- **Lab target:** [OWASP Juice Shop](https://owasp.org/www-project-juice-shop/), a deliberately vulnerable app, behind a small nginx proxy. It runs only when you ask for it (`--profile pentest`) and is bound to `127.0.0.1`.
+- **Detection (purple team):** the proxy writes a standard access log that the victim's Wazuh agent monitors. Each report includes the Wazuh web alerts (31xxx rules) raised during the authorised window, grouped by rule and source, with the SOAR outcome for each. Anything you tested that is missing from that list is a detection gap.
 
 Example run against Juice Shop: 2 medium (no HTTPS, no CSP), 2 low (no Referrer-Policy, `Access-Control-Allow-Origin: *`) and 1 info (only the deprecated Feature-Policy is set). It passes X-Frame-Options, `nosniff` and security.txt.
 
@@ -91,6 +97,7 @@ Example run against Juice Shop: 2 medium (no HTTPS, no CSP), 2 low (no Referrer-
 docker compose --profile pentest up -d juice-shop
 # open http://127.0.0.1:5678/form/purplen8-engagement, target http://juice-shop:3000
 docker exec -it purplen8-postgres psql -U purplen8 -d purplen8 -c "select severity, title from findings order by id desc limit 10;"
+./soar/scripts/simulate-web-alert.sh   # replay the sample web-attack log line; it appears in the next report's Detection section
 ```
 
 The workflow only reads and writes files in `pentest/reports/` (`N8N_RESTRICT_FILE_ACCESS_TO`).
@@ -116,7 +123,8 @@ The workflow only reads and writes files in `pentest/reports/` (`N8N_RESTRICT_FI
 - **TLS verification is off** for n8n to Wazuh API calls, because Wazuh uses a self-signed certificate. The traffic stays on the internal Docker network.
 - **Hosting detection is a heuristic** (known provider network numbers plus name keywords), not a full proxy/VPN database.
 - **Dedupe happens before notification:** if Telegram is down, that alert is not re-sent within the 10-minute window. It is still in `alert_log`.
-- The lab Wazuh manager runs **without the indexer or dashboard** to keep RAM low. Alerts are still in `alerts.json` and in the n8n audit log.
+- The lab Wazuh manager runs **without the indexer or dashboard** to keep RAM low. Alerts are still in `alerts.json` and in the n8n audit log. Wazuh's vulnerability detection is **disabled**: it needs the indexer, and left on it downloads about 40 GB of CVE feeds.
+- **No retry between Wazuh and n8n:** alerts sent while n8n is restarting are dropped (they stay in Wazuh's `alerts.json`). See the [threat model](docs/THREAT-MODEL.md).
 
 ## Quick start
 
@@ -153,6 +161,16 @@ docker exec -it purplen8-postgres psql -U purplen8 -d purplen8 \
   -c "select at, srcip, action, detail from response_log order by id desc limit 10;"
 ```
 
+## Testing
+
+| Layer | What it checks | Where it runs |
+|---|---|---|
+| **Unit tests** (`tests/unit/`, 20 tests) | The actual JavaScript from the n8n workflow files, run with mocked inputs: alert normalisation, scoring, escaping, decisions, the response command allowlist, the pentest scope gate and the header analysis | CI and locally: `node --test tests/unit/` |
+| **Static checks** (`tests/static.sh`) | Script syntax, `shellcheck`, workflow integrity (every connection and credential exists), a secret scan, and `docker compose` validation | CI and locally |
+| **Integration tests** (`tests/integration.sh`, 23 checks) | Against the running stack, using a *dry-run* flag so nothing is notified or blocked: webhook auth, every sample's severity, private-IP handling, dedupe (including 10 simultaneous alerts), offline enrichment, Wazuh API hardening, port exposure and the pentest scope gate | Locally, after `./setup.sh` |
+
+The unit tests read the code straight out of the exported workflows, so they always test what actually ships. Changing one scoring weight or loosening the IP check makes them fail.
+
 ## Scoring
 
 | Signal | Points |
@@ -177,8 +195,12 @@ victim/                     lab server: Ubuntu + Wazuh agent + iptables + unbloc
 soar/workflows/             n8n workflows (triage + active-response sub-workflow)
 soar/wazuh-integration/     Wazuh -> n8n integration, installer, API hardening
 soar/samples/               sample Wazuh alerts
-soar/scripts/               sample sender, brute-force simulator
+soar/scripts/               sample sender, SSH brute-force and web-log simulators
 pentest/workflows/          n8n engagement assistant workflow
+pentest/proxy/              nginx config for the logging proxy in front of Juice Shop
+tests/                      unit tests, static checks, integration tests
+docs/                       threat model, screenshots
+.github/workflows/          CI
 pentest/reports/            generated reports (git-ignored)
 ```
 
@@ -191,7 +213,7 @@ pentest/reports/            generated reports (git-ignored)
 | victim (Wazuh agent) | ~35 MB |
 | Postgres | ~30 MB |
 | enrich | ~20 MB |
-| juice-shop (only with `--profile pentest`) | ~180 MB |
+| Juice Shop + proxy (only with `--profile pentest`) | ~160 MB |
 
 ## Ethics
 

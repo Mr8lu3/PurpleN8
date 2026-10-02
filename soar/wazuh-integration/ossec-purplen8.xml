@@ -11,6 +11,15 @@
     <alert_format>json</alert_format>
   </integration>
 
+  <!-- Vulnerability detection needs the Wazuh indexer (not run in this lab) and
+       otherwise downloads ~40 GB of CVE feeds into the manager's volume. -->
+  <vulnerability-detection>
+    <enabled>no</enabled>
+  </vulnerability-detection>
+  <indexer>
+    <enabled>no</enabled>
+  </indexer>
+
   <!-- Lab log used by scripts/simulate-ssh-bruteforce.sh (if run against the manager) -->
   <localfile>
     <log_format>syslog</log_format>

@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Static checks (syntax, shellcheck, workflow integrity, secret scan, compose)
+        run: |
+          cp .env.example .env
+          ./tests/static.sh
+
+      - name: Unit tests (code from the n8n workflows)
+        run: node --test tests/unit/
