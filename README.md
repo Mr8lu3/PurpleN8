@@ -2,18 +2,28 @@
 
 [![CI](https://github.com/Mr8lu3/PurpleN8/actions/workflows/ci.yml/badge.svg)](https://github.com/Mr8lu3/PurpleN8/actions/workflows/ci.yml)
 
-**A local-first security automation lab built with n8n and Wazuh.**
-Wazuh detects, n8n triages, an analyst approves a block from Telegram, and every alert and decision is written to a local audit log.
+**A local-first purple-team lab: Wazuh detects, n8n triages, you approve the response from Telegram, and the pentest side shows what got detected.**
 
-Everything runs on your own machine in Docker. There are no paid services, no cloud SIEM and no third-party lookup APIs: alert data stays local. The only outbound traffic is the Telegram notification you opt into, plus downloads of public threat-intel datasets.
+## In 60 seconds
 
-It has two halves, for the blue and red sides of security work:
+<p align="center">
+  <img src="docs/screenshots/telegram-high-alert.png" alt="HIGH Telegram alert for an SSH brute force from a Tor exit node, with Block and Ignore buttons" width="420">
+</p>
 
-- **SOAR (blue):** Wazuh alert triage, scoring, deduplication and human-in-the-loop blocking.
-- **Pentest engagement assistant (red):** an authorisation and scope gate, a non-intrusive configuration review, findings tracking, a manual-testing checklist and a Markdown report, run against your own lab.
-- **The purple loop:** the lab web server's access log feeds Wazuh, so activity during an engagement reaches the SOAR side. The report shows which activity was **detected** and how it was handled.
+**The flow:** simulated attack → Wazuh alert → n8n enriches, scores and deduplicates → Telegram **🛑 Block / ✅ Ignore** → firewall rule on the victim → everything recorded in an audit log.
 
-It's backed by [unit, integration and CI tests](#testing) and a [threat model](docs/THREAT-MODEL.md) of the lab itself.
+- **Human-in-the-loop response:** blocks need an analyst's tap, expire automatically, and run through a Wazuh API user that can do nothing else. ([details](#what-it-does))
+- **Privacy by design:** IP enrichment is fully offline, ports are bound to `127.0.0.1`, and no alert data goes to third-party APIs. The only external service is the Telegram channel you opt into. ([details](#privacy-and-security-design))
+- **Red side:** a scope-gated engagement form, a non-intrusive OWASP security-header review, findings tracking and a Markdown report. ([details](#pentest-engagement-assistant))
+- **Purple loop:** each pentest report lists which activity Wazuh **detected** and how the SOAR side handled it, so detection gaps are visible.
+- **Tested like production code:** 20 unit tests run the real workflow code, 23 integration checks run against the live stack, CI runs on every push, and there's a [STRIDE threat model](docs/THREAT-MODEL.md) of the lab itself. ([details](#testing))
+- **Runs on a laptop:** free tools only, about 1 GB of RAM, and one setup script.
+
+```bash
+cp .env.example .env                          # add your Telegram bot token and chat ID
+./setup.sh                                    # builds, hardens, installs and imports everything
+./soar/scripts/simulate-ssh-bruteforce.sh     # watch the alert arrive in Telegram
+```
 
 ---
 
@@ -55,10 +65,8 @@ For each Wazuh alert (level 5+):
 Example: a simulated SSH brute force from a Tor exit node raises 9 Wazuh alerts. This produces **one** medium notification and **one** high alert with buttons, and the rest are suppressed and logged.
 
 <p align="center">
-  <img src="docs/screenshots/telegram-high-alert.png" alt="HIGH Telegram alert for an SSH brute force from a Tor exit node, with Block and Ignore buttons" width="420">
-  &nbsp;
   <img src="docs/screenshots/approval-confirmed.png" alt="n8n confirmation page shown after tapping Block" width="320"><br>
-  <sub>Left: a HIGH alert with enrichment, MITRE ATT&CK IDs and the reasons for its score. Right: the page that opens after tapping a button (served by the local n8n at 127.0.0.1).</sub>
+  <sub>Tapping a button opens this confirmation page, served by your local n8n at 127.0.0.1. Telegram never gets access to n8n.</sub>
 </p>
 
 <p align="center">
