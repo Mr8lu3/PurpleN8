@@ -62,6 +62,19 @@ for f in files:
             errors.append(f"{f}: looks like it contains a {label}")
 print(f"[secrets]   {len(files)} files scanned")
 
+# --- 3. executable bits ------------------------------------------------------------
+# Committing from Windows (core.fileMode=false) silently drops +x, which breaks
+# ./setup.sh for anyone who clones the repo. Check the mode git actually stores.
+try:
+    staged = subprocess.run(["git", "ls-files", "-s"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    for line in staged.splitlines():
+        mode, _, _, path = line.split(maxsplit=3)
+        if (path.endswith(".sh") or path.startswith("tests/check_repo")) and mode != "100755":
+            errors.append(f"{path}: not executable in git (fix: git update-index --chmod=+x {path})")
+    print("[modes]     executable bits checked")
+except (subprocess.CalledProcessError, FileNotFoundError):
+    print("[modes]     not a git checkout, skipped")
+
 if errors:
     print("\nFAILED:"); [print("  -", e) for e in errors]; sys.exit(1)
 print("OK")
