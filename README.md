@@ -165,7 +165,7 @@ docker exec -it purplen8-postgres psql -U purplen8 -d purplen8 \
 
 | Layer | What it checks | Where it runs |
 |---|---|---|
-| **Unit tests** (`tests/unit/`, 20 tests) | The actual JavaScript from the n8n workflow files, run with mocked inputs: alert normalisation, scoring, escaping, decisions, the response command allowlist, the pentest scope gate and the header analysis | CI and locally: `node --test tests/unit/` |
+| **Unit tests** (`tests/unit/`, 20 tests) | The actual JavaScript from the n8n workflow files, run with mocked inputs: alert normalisation, scoring, escaping, decisions, the response command allowlist, the pentest scope gate and the header analysis | CI and locally: `node --test tests/unit/*.test.mjs` |
 | **Static checks** (`tests/static.sh`) | Script syntax, `shellcheck`, workflow integrity (every connection and credential exists), a secret scan, and `docker compose` validation | CI and locally |
 | **Integration tests** (`tests/integration.sh`, 23 checks) | Against the running stack, using a *dry-run* flag so nothing is notified or blocked: webhook auth, every sample's severity, private-IP handling, dedupe (including 10 simultaneous alerts), offline enrichment, Wazuh API hardening, port exposure and the pentest scope gate | Locally, after `./setup.sh` |
 
