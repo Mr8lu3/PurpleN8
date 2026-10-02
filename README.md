@@ -63,8 +63,8 @@ Example: a simulated SSH brute force from a Tor exit node raises 9 Wazuh alerts.
 
 <p align="center">
   <img src="docs/screenshots/telegram-medium-ssh.png" alt="MEDIUM Telegram alert for a failed SSH login from a Tor exit node" width="700"><br>
-  <img src="docs/screenshots/telegram-medium-sqli.png" alt="MEDIUM Telegram alert for a SQL injection attempt from a scanning service" width="700"><br>
-  <sub>MEDIUM alerts arrive as silent notifications, with the raw log line HTML-escaped.</sub>
+  <img src="docs/screenshots/telegram-medium-sqli.png" alt="MEDIUM Telegram alert for a SQL injection attempt against the lab web server, raised by Wazuh rule 31164" width="700"><br>
+  <sub>MEDIUM alerts arrive as silent notifications, with the raw log line HTML-escaped. The SQL injection alert comes from the purple loop: the lab web server's access log, read by Wazuh (rule 31164).</sub>
 </p>
 
 ## Pentest engagement assistant
@@ -80,6 +80,11 @@ flowchart LR
     MD --> T["Telegram summary"]
 ```
 
+<p align="center">
+  <img src="docs/screenshots/engagement-form.png" alt="PurpleN8 engagement form asking for engagement name, tester, authorisation reference, targets, testing window and authorisation confirmation" width="380"><br>
+  <sub>The engagement form. Nothing is tested until the scope gate accepts the authorisation, targets and dates.</sub>
+</p>
+
 - **Scope gate:** every target must be an http(s) URL on the lab allowlist (`PENTEST_ALLOWED_HOSTS`, default `juice-shop`). An authorisation reference and confirmation are required, and today must fall inside the authorised window. **Rejected requests are recorded too**, which gives an audit trail of what was refused and why.
 - **Non-intrusive checks:** one ordinary GET of each target's home page and `/.well-known/security.txt`. Headers and cookies are compared with the [OWASP Secure Headers Project](https://owasp.org/www-project-secure-headers/) guidance: HTTPS, HSTS, CSP, clickjacking protection, `nosniff`, Referrer-Policy, Permissions-Policy, CORS, version disclosure, cookie flags and security.txt. **No attack payloads are sent.**
 - **Severity** uses a simple qualitative rubric (info / low / medium / high). It is **not CVSS**.
@@ -90,7 +95,13 @@ flowchart LR
 Example run against Juice Shop: 2 medium (no HTTPS, no CSP), 2 low (no Referrer-Policy, `Access-Control-Allow-Origin: *`) and 1 info (only the deprecated Feature-Policy is set). It passes X-Frame-Options, `nosniff` and security.txt.
 
 <p align="center">
-  <img src="docs/screenshots/telegram-engagement-summary.png" alt="Telegram summary of a completed pentest engagement" width="420">
+  <img src="docs/screenshots/report-detection.png" alt="Detection (purple team) section of an engagement report, listing Wazuh web alerts grouped by rule and source with their SOAR outcomes" width="900"><br>
+  <sub>The report's Detection section: the SQL injection was detected by Wazuh (rule 31164) and notified, while repeated server errors were grouped and mostly suppressed.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/telegram-engagement-summary.png" alt="Telegram summary of a completed pentest engagement, including the number of Wazuh web detections in the window" width="420"><br>
+  <sub>Engagement summary, including how many Wazuh web alerts were raised during the authorised window.</sub>
 </p>
 
 ```bash
